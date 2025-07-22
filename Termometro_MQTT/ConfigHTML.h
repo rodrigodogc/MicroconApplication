@@ -1,0 +1,172 @@
+static const char paginaConfig[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Temperaturas DEE</title>
+  <style>
+    :root {
+      --primary-color: #005a9c;   /* Azul UFPE */
+      --secondary-color: #f0f2f5;
+      --text-color: #333;
+      --border-radius: 8px;
+    }
+    html {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    body {
+      margin: 0;
+      padding-top: 80px;          /* espaço para navbar fixa */
+      background-color: var(--secondary-color);
+      color: var(--text-color);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #fff;
+      padding: 0 2rem;
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 70px;
+      box-shadow: 0 2px 5px rgba(0,0,0,.1);
+      z-index: 1000;
+      box-sizing: border-box;
+    }
+    .nav-title {
+      font-size: 1.4rem; font-weight: 600;
+      color: var(--primary-color);
+      white-space: nowrap;
+    }
+    .section-box {
+      background:#fff; border-radius:var(--border-radius);
+      box-shadow:0 4px 12px rgba(0,0,0,.08);
+      padding:2rem; margin-top:2rem;
+      max-width:500px; width:90%; text-align:center;
+    }
+    h2{margin-top:0;color:var(--primary-color)}
+    .config-form{display:flex;flex-direction:column;text-align:left}
+    .form-group{margin-bottom:1rem}
+    .form-group label{display:block;margin-bottom:.3rem;font-weight:500}
+    .form-group input{
+      width:100%;padding:.7rem;border:1px solid #ccc;border-radius:var(--border-radius);
+      font-size:1rem;box-sizing:border-box
+    }
+    .form-group input:focus{
+      outline:none;border-color:var(--primary-color);
+      box-shadow:0 0 5px rgba(0,90,156,.3)
+    }
+    .config-form button{
+      padding:.8rem;font-size:1rem;background:var(--primary-color);
+      color:#fff;border:none;border-radius:var(--border-radius);cursor:pointer;width:100%
+    }
+    #statusMsg{margin-top:1rem;font-size:.9rem}
+  </style>
+</head>
+
+<body>
+  <nav><span class="nav-title">Configurações do Sensor</span></nav>
+
+  <div id="configBox" class="section-box">
+    <h2>Configuração Wi-Fi / MQTT</h2>
+
+    <form class="config-form" id="configForm">
+      <div class="form-group">
+        <label for="ssid">SSID Wi-Fi</label>
+        <input type="text" id="ssid" placeholder="Nome da rede">
+      </div>
+      <div class="form-group">
+        <label for="wifiPass">Senha Wi-Fi</label>
+        <input type="password" id="wifiPass" placeholder="Senha da rede">
+      </div>
+      <div class="form-group">
+        <label for="mqttHost">Host Broker MQTT</label>
+        <input type="text" id="mqttHost" placeholder="host">
+      </div>
+      <div class="form-group">
+        <label for="mqttUser">Usuário MQTT</label>
+        <input type="text" id="mqttUser" placeholder="Usuário">
+      </div>
+      <div class="form-group">
+        <label for="mqttPass">Senha MQTT</label>
+        <input type="password" id="mqttPass" placeholder="Senha">
+      </div>
+      <div class="form-group">
+        <label for="local">Local</label>
+        <input type="text" id="local" placeholder="local do sensor">
+      </div>
+      <button type="submit">Salvar Configurações</button>
+      <div id="statusMsg"></div>
+    </form>
+  </div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const status = (msg) => { 
+      $('statusMsg').innerText = msg; 
+    };
+
+    /*  Preenche formulário a partir de CSV vindo do ESP  */
+    function preencherForm(csv) {
+      const [ssid,pwd,ip,user,pass,local] = csv.split(',');
+      $('ssid').value      = ssid ?? '';
+      $('wifiPass').value  = pwd  ?? '';
+      $('mqttHost').value  = ip   ?? '';
+      $('mqttUser').value  = user ?? '';
+      $('mqttPass').value  = pass ?? '';
+      $('local').value     = local?? '';
+    }
+
+    /* preenche se tiver alguma config */
+    document.addEventListener('DOMContentLoaded' , async () => {
+      status('Carregando configuração...');
+      try {
+        const r = await fetch('/recuperarConfigs');
+        if (!r.ok) throw new Error(await r.text());
+        const csv = await r.text();
+        preencherForm(csv);
+        status('Configuração carregada.');
+      } catch (err) {
+        console.error(err);
+        status(`Erro: ${err.message}`);
+      }
+    });
+
+    /*  SALVAR CONFIG /configurar (POST)  */
+    $('configForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const csv = [
+        $('ssid').value,
+        $('wifiPass').value,
+        $('mqttHost').value,
+        $('mqttUser').value,
+        $('mqttPass').value,
+        $('local').value
+      ].join(',');
+
+      status('Enviando configs..');
+      try {
+        const r = await fetch('/configurar', {
+          method:'POST',
+          headers:{'Content-Type':'text/plain'},
+          body: csv
+        });
+        if (!r.ok) throw new Error(await r.text());
+        status('Configurações salvas! Reiniciando dispositivo...');
+        alert('Configurações salvas. O dispositivo vai reiniciar.');
+      } catch (err) {
+        console.error(err);
+        status(`Erro ao salvar: ${err.message}`);
+      }
+    });
+  </script>
+</body>
+</html>
+
+)rawliteral";
