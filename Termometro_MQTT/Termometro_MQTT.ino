@@ -6,7 +6,9 @@
 #include <ESPAsyncWebServer.h>
 #include <ESPAsyncTCP.h>
 #include <DNSServer.h>
+#include <LittleFS.h>
 #include <Preferences.h>
+#include <ArduinoJson.h>
 #include "ConfigHTML.h"
 #include "ParametrosHTML.h"
 
@@ -30,7 +32,7 @@ Preferences prefs;
 /*  globais  */
 WiFiClient netClient;
 AsyncWebServer server(80);
-AsyncWebSocket ws("/ws");  // WS só para temperatura
+// AsyncWebSocket ws("/ws");  // WS só para temperatura
 DNSServer dnsServer;
 const byte DNS_PORT = 53;
 bool modoConfiguracao = false;
@@ -41,11 +43,11 @@ Adafruit_MQTT_Publish* Temperatura = nullptr;
 OneWire oneWire(PINO_ONEWIRE);
 DallasTemperature sensors(&oneWire);
 
+float temperaturaC = 0.0;
+
 /* Timers */
 unsigned long previousMillis = 0;
 const long delayLoop = 2000;
-
-float temperaturaC = 0.0;
 
 /* Atualiza a struct CONFIG  */
 void updateConfigs(String dados) {
@@ -130,30 +132,31 @@ void iniciarModoAP() {
 void registrarRotasHTTP() {
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest* req) {
-    if (modoConfiguracao)               
+    if (modoConfiguracao)
       req->send_P(200, "text/html", paginaConfig);
-    else                                     
+    else
       req->send_P(200, "text/html", paginaParametros);
   });
 
-  server.on("/configurar", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL, 
-  [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
-    static String body;
-    if (index == 0) body = ""; 
-    body += String((char*)data).substring(0, len);
+  server.on(
+    "/configurar", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      static String body;
+      if (index == 0) body = "";
+      body += String((char*)data).substring(0, len);
 
-    if (index + len == total) {  
-      if (!body.length()) {
-        request->send(400, "text/plain", "Corpo vazio");
-        return;
+      if (index + len == total) {
+        if (!body.length()) {
+          request->send(400, "text/plain", "Corpo vazio");
+          return;
+        }
+        updateConfigs(body);
+        salvarConfigs();
+        request->send(200, "text/plain", "OK");
+        delay(800);
+        ESP.restart();
       }
-      updateConfigs(body);
-      salvarConfigs();
-      request->send(200, "text/plain", "OK");
-      delay(800);
-      ESP.restart();
-    }
-  });
+    });
 
   server.on("/recuperarConfigs", HTTP_GET, [](AsyncWebServerRequest* response) {
     String dados = CONFIG.nomeWifi + "," + CONFIG.senhaWifi + "," + CONFIG.ipBroker + "," + CONFIG.userBroker + "," + CONFIG.passBroker + "," + CONFIG.local;
@@ -161,8 +164,18 @@ void registrarRotasHTTP() {
     if (CONFIG.nomeWifi == "")
       response->send(404, "text/plain", "Sem configuracao");
     else {
-      response->send(200, "text/plain", dados);   
+      response->send(200, "text/plain", dados);
     }
+  });
+
+  server.on("/get_temperatura", HTTP_GET, [](AsyncWebServerRequest* response) {
+    JsonDocument dadoJson;
+    String dadoString;
+
+    dadoJson["temp"] = String(temperaturaC);
+    serializeJson(dadoJson, dadoString);
+
+    response->send(200, "application/json", dadoString);
   });
 
   server.on("/resetar_config", HTTP_POST, [](AsyncWebServerRequest* response) {
@@ -208,8 +221,9 @@ void setup() {
   }
 
   registrarRotasHTTP();
-  ws.onEvent(wsEvent);
-  server.addHandler(&ws);
+  /* Websocket removido */
+  // ws.onEvent(wsEvent);
+  //server.addHandler(&ws);
 
   if (WiFi.status() != WL_CONNECTED) {
     iniciarModoAP();
@@ -248,12 +262,12 @@ void loop() {
     } else {
       String tempC = String(temperaturaC);
       // Serial.printf("Temperatura: %s °C\n", tempC.c_str());
-      ws.textAll(tempC);  // joga no websocket a temperatura
+      // ws.textAll(tempC);  // joga no websocket a temperatura
       if (Temperatura) {  // e publica no broker
         Temperatura->publish(temperaturaC);
       }
     }
   }
 
-  ws.cleanupClients();
+  //ws.cleanupClients();
 }

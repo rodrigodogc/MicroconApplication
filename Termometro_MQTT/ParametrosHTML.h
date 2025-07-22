@@ -204,28 +204,14 @@ static const char paginaParametros[] PROGMEM = R"rawliteral(
       pointer: true,
       pointerOptions: { color: '#333' },
       gaugeWidthScale: 0.6,
+      decimals: 2,
       counter: true
-    });
-
-    /*  WebSocket da temperatura  */
-    var ws = new WebSocket(`ws://${window.location.hostname}/ws`);
-    ws.addEventListener('open',   () => console.log('WebSocket aberto'));
-    ws.addEventListener('close',  () => {
-      console.log('WebSocket fechado')
-      status('Conexão com o WS perdida. Tentando reconectar...'); // reconexão automatica :)
-      setTimeout(() => {
-        ws = new WebSocket(`ws://${window.location.hostname}/ws`);
-      }, 5000);
-    });
-    ws.addEventListener('message', e => {
-      const temp = parseFloat(e.data);      // recebe "24.7"
-      if (!isNaN(temp)) gauge.refresh(temp);
     });
 
     const $ = id => document.getElementById(id);
     const status = msg => { $('statusMsg').innerText = msg; };
 
-    /* Lê configuração salva ao carregar a página */
+    /* Lê configuração salva ao carregar a página e começa a atualizar a temperatura*/
     document.addEventListener('DOMContentLoaded', async () => {
       status('Carregando configuração...');
       try {
@@ -245,6 +231,22 @@ static const char paginaParametros[] PROGMEM = R"rawliteral(
       } catch {
         status('Sem configuração salva.');
       }
+
+      const atualizarTemp = async () => {
+        const response = await fetch('/get_temperatura');
+        const data = await response.json();
+        console.log(data);
+        const temp = parseFloat(data.temp);
+        if (!isNaN(temp)) {
+          gauge.refresh(temp);
+          console.log('Temperatura atualizada: ' + temp);
+        }
+        return true;
+      }
+
+      setInterval(() => {
+        atualizarTemp();
+      }, 4000);
     });
 
     /* Navegação */
