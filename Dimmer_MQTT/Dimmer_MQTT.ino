@@ -15,12 +15,12 @@
 #define PWM_PINO   D2
 #define BTN_RESET  D3  //  5s em GND = reset configs
 
-/* -------------------- tempos / rede -------------------- */
-#define PORTA_BROKER    1883
+/* -------------------- Parametrização -------------------- */
 #define WIFI_RETRY_MS   5000
 #define MQTT_RETRY_MS   3000
 #define MQTT_PING_MS   15000
 #define RESET_HOLD_MS   5000
+#define PORTA_BROKER    1883
 
 /* -------------------- Config persistida -------------------- */
 typedef struct {
@@ -35,7 +35,7 @@ WiFiClient netClient;
 AsyncWebServer server(80);
 
 unsigned int DutyciclePWM  = 127;
-unsigned int FrequenciaPWM = 5000;
+unsigned int FrequenciaPWM = 10000;
 
 DNSServer dnsServer;
 const byte DNS_PORT = 53;
@@ -49,7 +49,7 @@ static const char* TOPIC_SET_VEL = "ventilador/set_velocidade"; // entrada
 static const char* TOPIC_GET_VEL = "ventilador/get_velocidade"; // saída
 
 // Tópicos de temperaturas (entrada)
-static const char* TOPIC_TEMP_INT = "sensores/temperatura/interna";
+static const char* TOPIC_TEMP_INT = "Ventilador/Temperatura";//"sensores/temperatura/interna";
 static const char* TOPIC_TEMP_EXT = "sensores/temperatura/externa";
 
 // Tópicos do MODO AUTOMÁTICO
@@ -140,7 +140,6 @@ void salvarConfigs() {
 /* -------------------- Persistência do modo automático -------------------- */
 void loadAutoFromPrefs() {
   prefs.begin("config", true);
-  // usar UChar para compatibilidade ampla
   uint8_t v = prefs.getUChar("auto", 0);
   prefs.end();
   modoAutomatico = (v != 0);
@@ -151,7 +150,6 @@ void saveAutoToPrefs() {
   prefs.begin("config", false);
   prefs.putUChar("auto", modoAutomatico ? 1 : 0);
   prefs.end();
-  Serial.printf("Modo automático salvo: %s\n", modoAutomatico ? "ON" : "OFF");
 }
 
 /* -------------------- Wi-Fi -------------------- */
@@ -167,6 +165,24 @@ void ensureWiFiConnected() {
 }
 
 /* -------------------- MQTT -------------------- */
+void scheduleVelPublish() {
+  velPublishPercent  = (int)round((100.0/255.0) * (double)DutyciclePWM);
+  velPublishPending  = true;
+}
+
+void scheduleAutoPublish() {
+  autoPublishPending = true;
+}
+
+void onSetAutoMsg(const char* payload) {
+  bool novo = (strcasecmp(payload, "ON") == 0) || (strcmp(payload, "1") == 0) || (strcasecmp(payload, "true") == 0);
+  if (modoAutomatico != novo) {
+    modoAutomatico = novo;
+    saveAutoToPrefs();
+  }
+  scheduleAutoPublish();  // republica para sincronizar
+}
+
 void doMqttConnect() {
   if (!mqtt) return;
   Serial.print("Conectando ao Broker MQTT... ");
@@ -192,6 +208,22 @@ void doMqttConnect() {
     Serial.printf("Falha [%s]\n", mqtt->connectErrorString(rc));
     mqtt->disconnect();
   }
+}
+
+void onSetVelMsg(const char* payload) {
+  int v = atoi(payload);
+  bool temPercent = strchr(payload, '%') != nullptr;
+  if (temPercent || (v >= 0 && v <= 100)) {
+    v = clampi(v, 0, 100);
+    v = map(v, 0, 100, 0, 255);
+  }
+  v = clampi(v, 0, 255);
+
+  Serial.printf("[MQTT] %s: '%s' -> duty=%d (%.1f%%)\n",
+                TOPIC_SET_VEL, payload, v, (100.0/255.0)*v);
+
+  applyDuty(v);
+  scheduleVelPublish();
 }
 
 void ensureMqttConnected() {
@@ -259,49 +291,6 @@ void applyDuty(int duty_0_255) {
   analogWrite(PWM_PINO, DutyciclePWM);
 }
 
-void scheduleVelPublish() {
-  velPublishPercent  = (int)round((100.0/255.0) * (double)DutyciclePWM);
-  velPublishPending  = true;
-}
-
-/* -------------------- Callbacks de inscrição -------------------- */
-void onSetVelMsg(const char* payload) {
-  int v = atoi(payload);
-  bool temPercent = strchr(payload, '%') != nullptr;
-  if (temPercent || (v >= 0 && v <= 100)) {
-    v = clampi(v, 0, 100);
-    v = map(v, 0, 100, 0, 255);
-  }
-  v = clampi(v, 0, 255);
-
-  Serial.printf("[MQTT] %s: '%s' -> duty=%d (%.1f%%)\n",
-                TOPIC_SET_VEL, payload, v, (100.0/255.0)*v);
-
-  applyDuty(v);
-  scheduleVelPublish();
-}
-
-static bool parseBoolPayload(const char* p) {
-  String s = String(p);
-  s.trim(); s.toLowerCase();
-  if (s=="1" || s=="on" || s=="true" || s=="enable" || s=="enabled") return true;
-  return false; // "0","off","false", etc false
-}
-
-void onSetAutoMsg(const char* payload) {
-  bool novo = parseBoolPayload(payload);
-  if (modoAutomatico != novo) {
-    modoAutomatico = novo;
-    saveAutoToPrefs();    // persiste
-    Serial.printf("[MQTT] %s: '%s' -> auto=%s\n", TOPIC_SET_AUTO, payload, modoAutomatico?"ON":"OFF");
-  }
-  scheduleAutoPublish();  // republica para sincronizar
-}
-
-void scheduleAutoPublish() {
-  autoPublishPending = true;
-}
-
 /* -------------------- AP e Rotas -------------------- */
 void iniciarModoAP() {
   modoConfiguracao = true;
@@ -338,24 +327,14 @@ void iniciarRotasHTTP() {
         updateConfigs(body);
         salvarConfigs();
         request->send(200, "text/plain", "OK");
-        delay(800);
-        ESP.restart();
       }
     }
   );
 
-  // Recuperar configs (CSV)
-  server.on("/recuperarConfigs", HTTP_GET, [](AsyncWebServerRequest* request) {
-    String dados = CONFIG.nomeWifi + "," + CONFIG.senhaWifi + "," + CONFIG.ipBroker + "," +
-                   CONFIG.userBroker + "," + CONFIG.passBroker + "," + CONFIG.local;
-    if (CONFIG.nomeWifi == "") request->send(404, "text/plain", "Sem configuracao");
-    else                       request->send(200, "text/plain", dados);
-  });
-
-  // SET dutycicle (0..255 ou XX%)
+  // seta dutycicle (aceita 0..255 ou 0..100%)
   server.on("/set_dutycicle", HTTP_GET, [](AsyncWebServerRequest* request) {
     if (!request->hasParam("dutycicle")) {
-      request->send(400, "text/plain", "FALTA O PARAMETRO dutycicle");
+    request->send(400, "text/plain", "Falta parametro 'dutycicle'");
       return;
     }
     String duty = request->getParam("dutycicle")->value();
@@ -386,9 +365,12 @@ void iniciarRotasHTTP() {
   // temperaturas (vindas do MQTT)
   server.on("/get_temperaturas", HTTP_GET, [](AsyncWebServerRequest* request) {
     StaticJsonDocument<128> j;
-    if (!isnan(temperaturaInterna)) j["interna"] = temperaturaInterna;
-    if (!isnan(temperaturaExterna)) j["externa"] = temperaturaExterna;
-    String out; serializeJson(j, out);
+    if (!isnan(temperaturaInterna)) 
+      j["interna"] = String(temperaturaInterna);
+    if (!isnan(temperaturaExterna)) 
+      j["externa"] = String(temperaturaExterna);
+    String out; 
+    serializeJson(j, out);
     request->send(200, "application/json", out);
   });
 
