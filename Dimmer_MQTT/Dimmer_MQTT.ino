@@ -7,21 +7,22 @@
 #include <LittleFS.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
-#include "ConfigHTML.h"      
-#include "ParametrosHTML.h"  
+
+#include "ConfigHTML.h"
+#include "ParametrosHTML.h"
 
 /* -------------------- Pinos -------------------- */
-#define LED        D4
 #define PWM_PINO   D2
-#define BTN_RESET  D3 
+#define BTN_RESET  D3  //  5s em GND = reset configs
 
-/* -------------------- tempos preset -------------------- */
-#define PORTA_BROKER   1883
-#define WIFI_RETRY_MS  5000   // tenta religar o Wi-Fi a cada 5s se cair
-#define MQTT_RETRY_MS  3000   // tenta reconectar ao broker a cada 3s
-#define MQTT_PING_MS  15000   // ping a cada 15s
-#define RESET_HOLD_MS  5000   // tempo de reset segurando o botão em d4
+/* -------------------- tempos / rede -------------------- */
+#define PORTA_BROKER    1883
+#define WIFI_RETRY_MS   5000
+#define MQTT_RETRY_MS   3000
+#define MQTT_PING_MS   15000
+#define RESET_HOLD_MS   5000
 
+/* -------------------- Config persistida -------------------- */
 typedef struct {
   String nomeWifi, senhaWifi, ipBroker, userBroker, passBroker, local;
 } Config;
@@ -34,7 +35,7 @@ WiFiClient netClient;
 AsyncWebServer server(80);
 
 unsigned int DutyciclePWM  = 127;
-unsigned int FrequenciaPWM = 5000;   
+unsigned int FrequenciaPWM = 5000;
 
 DNSServer dnsServer;
 const byte DNS_PORT = 53;
@@ -43,53 +44,56 @@ bool modoConfiguracao = false;
 /* MQTT */
 Adafruit_MQTT_Client* mqtt = nullptr;
 
-// Tópicos pra se inscrever
+// Tópicos de velocidade
 static const char* TOPIC_SET_VEL = "ventilador/set_velocidade"; // entrada
 static const char* TOPIC_GET_VEL = "ventilador/get_velocidade"; // saída
 
-// Subscriptions
-Adafruit_MQTT_Subscribe* setVelSub  = nullptr; // ventilador/set_velocidade
-Adafruit_MQTT_Subscribe* tempIntSub = nullptr; // sensores/temperatura/interna
-Adafruit_MQTT_Subscribe* tempExtSub = nullptr; // sensores/temperatura/externa
-Adafruit_MQTT_Publish*   velPub     = nullptr; // ventilador/get_velocidade
+// Tópicos de temperaturas (entrada)
+static const char* TOPIC_TEMP_INT = "sensores/temperatura/interna";
+static const char* TOPIC_TEMP_EXT = "sensores/temperatura/externa";
+
+// Tópicos do MODO AUTOMÁTICO
+static const char* TOPIC_SET_AUTO = "ventilador/set_automatico";
+static const char* TOPIC_GET_AUTO = "ventilador/get_automatico";
+
+// Subscriptions / Publish
+Adafruit_MQTT_Subscribe* setVelSub  = nullptr;
+Adafruit_MQTT_Subscribe* tempIntSub = nullptr;
+Adafruit_MQTT_Subscribe* tempExtSub = nullptr;
+Adafruit_MQTT_Subscribe* autoSub    = nullptr;
+Adafruit_MQTT_Publish*   velPub     = nullptr;
+Adafruit_MQTT_Publish*   autoPub    = nullptr;
 
 // Temperaturas vindas do MQTT
-float temperaturaInterna = 0.0;
-float temperaturaExterna = 0.0;
+float temperaturaInterna = NAN;
+float temperaturaExterna = NAN;
 
-/* Estados de reconexão */
+// Estado do modo automático
+bool modoAutomatico = false;
+
+// Estados de reconexão
 static unsigned long lastWifiAttempt = 0;
 static unsigned long lastMqttAttempt = 0;
 static unsigned long lastMqttPing    = 0;
 
-/* Fila de publicação (para evitar publish dentro de callbacks HTTP) */
+// Filas de publicação
 int velPublishPercent = -1;
 volatile bool velPublishPending = false;
 unsigned long lastVelPublishTry = 0;
 const unsigned long VEL_PUBLISH_MIN_MS = 120;
 
-/* -------------------- Prototypes -------------------- */
-void updateConfigs(String dados);
-void carregarConfigs();
-void salvarConfigs();
-
-void iniciarModoAP();
-void iniciarRotasHTTP();
-
-void ensureWiFiConnected();
-void doMqttConnect();
-void ensureMqttConnected();
-
-void onSetVelMsg(const char* payload);
-void applyDuty(int duty_0_255);
-void scheduleVelPublish();
+// Publicação de estado automático
+volatile bool autoPublishPending = false;
+unsigned long lastAutoPublishTry = 0;
+const unsigned long AUTO_PUBLISH_MIN_MS = 120;
 
 static inline int clampi(int v, int lo, int hi) { 
   return v < lo ? lo : (v > hi ? hi : v); 
 }
 
-/* -------------------- Config helpers -------------------- */
+/* -------------------- Config  -------------------- */
 void updateConfigs(String dados) {
+  // wifi,senha,ip,user,pass,local
   int idx = 0;
   while (dados.indexOf(',') != -1) {
     int pos   = dados.indexOf(',');
@@ -104,17 +108,17 @@ void updateConfigs(String dados) {
     dados.remove(0, pos + 1);
     idx++;
   }
-  CONFIG.local = dados;
+  CONFIG.local = dados; // último campo
 }
 
 void carregarConfigs() {
   prefs.begin("config", true);
-  CONFIG.nomeWifi  = prefs.getString("wifi",  "");
-  CONFIG.senhaWifi = prefs.getString("senha", "");
-  CONFIG.ipBroker  = prefs.getString("ip",    "");
-  CONFIG.userBroker= prefs.getString("user",  "");
-  CONFIG.passBroker= prefs.getString("pass",  "");
-  CONFIG.local     = prefs.getString("local", "");
+  CONFIG.nomeWifi   = prefs.getString("wifi",  "");
+  CONFIG.senhaWifi  = prefs.getString("senha", "");
+  CONFIG.ipBroker   = prefs.getString("ip",    "");
+  CONFIG.userBroker = prefs.getString("user",  "");
+  CONFIG.passBroker = prefs.getString("pass",  "");
+  CONFIG.local      = prefs.getString("local", "");
   prefs.end();
 
   if (CONFIG.nomeWifi == "") Serial.println("Nenhuma configuração encontrada; entrando em modo AP.");
@@ -131,6 +135,23 @@ void salvarConfigs() {
   prefs.putString("local", CONFIG.local);
   prefs.end();
   Serial.println("Configurações salvas.");
+}
+
+/* -------------------- Persistência do modo automático -------------------- */
+void loadAutoFromPrefs() {
+  prefs.begin("config", true);
+  // usar UChar para compatibilidade ampla
+  uint8_t v = prefs.getUChar("auto", 0);
+  prefs.end();
+  modoAutomatico = (v != 0);
+  Serial.printf("Modo automático (prefs): %s\n", modoAutomatico ? "ON" : "OFF");
+}
+
+void saveAutoToPrefs() {
+  prefs.begin("config", false);
+  prefs.putUChar("auto", modoAutomatico ? 1 : 0);
+  prefs.end();
+  Serial.printf("Modo automático salvo: %s\n", modoAutomatico ? "ON" : "OFF");
 }
 
 /* -------------------- Wi-Fi -------------------- */
@@ -153,31 +174,29 @@ void doMqttConnect() {
   if (rc == 0) {
     Serial.println("Conectado.");
 
-    // (Re)inscreve
-    if (setVelSub) {
-      bool ok = mqtt->subscribe(setVelSub);
-      Serial.printf("Subscribe %s: %s\n", TOPIC_SET_VEL, ok ? "ok" : "falhou");
-    }
-    if (tempIntSub) {
-      bool ok = mqtt->subscribe(tempIntSub);
-      Serial.printf("Subscribe %s: %s\n", "sensores/temperatura/interna", ok ? "ok" : "falhou");
-    }
-    if (tempExtSub) {
-      bool ok = mqtt->subscribe(tempExtSub);
-      Serial.printf("Subscribe %s: %s\n", "sensores/temperatura/externa", ok ? "ok" : "falhou");
-    }
+    if (setVelSub)  { bool ok = mqtt->subscribe(setVelSub);  
+    Serial.printf("Subscribe %s: %s\n", TOPIC_SET_VEL,  ok?"ok":"falhou"); }
+    if (tempIntSub) { bool ok = mqtt->subscribe(tempIntSub); 
+    Serial.printf("Subscribe %s: %s\n", TOPIC_TEMP_INT, ok?"ok":"falhou"); }
+    if (tempExtSub) { bool ok = mqtt->subscribe(tempExtSub); 
+    Serial.printf("Subscribe %s: %s\n", TOPIC_TEMP_EXT, ok?"ok":"falhou"); }
+    if (autoSub)    { bool ok = mqtt->subscribe(autoSub);    
+    Serial.printf("Subscribe %s: %s\n", TOPIC_SET_AUTO, ok?"ok":"falhou"); }
+
+    // republica estados atuais
+    scheduleVelPublish();
+    scheduleAutoPublish();
 
     lastMqttPing = millis();
   } else {
     Serial.printf("Falha [%s]\n", mqtt->connectErrorString(rc));
-    mqtt->disconnect(); // estado limpo
+    mqtt->disconnect();
   }
 }
 
 void ensureMqttConnected() {
   if (!mqtt || !WiFi.isConnected()) return;
 
-  // reconecta se caiu o broker
   if (!mqtt->connected()) {
     unsigned long now = millis();
     if (now - lastMqttAttempt >= MQTT_RETRY_MS) {
@@ -187,8 +206,8 @@ void ensureMqttConnected() {
     return;
   }
 
-  // processa tráfego
   mqtt->processPackets(10);
+
   Adafruit_MQTT_Subscribe* sub;
   while ((sub = mqtt->readSubscription(10))) {
     if (sub == setVelSub) {
@@ -197,11 +216,12 @@ void ensureMqttConnected() {
       temperaturaInterna = atof((char*)tempIntSub->lastread);
     } else if (sub == tempExtSub) {
       temperaturaExterna = atof((char*)tempExtSub->lastread);
+    } else if (sub == autoSub) {
+      onSetAutoMsg((char*)autoSub->lastread); // salva e publica
     }
     yield();
   }
 
-  // ping keepalive
   unsigned long now = millis();
   if (now - lastMqttPing >= MQTT_PING_MS) {
     lastMqttPing = now;
@@ -211,7 +231,6 @@ void ensureMqttConnected() {
     }
   }
 
-  // publica velocidade pendente
   if (velPublishPending && (now - lastVelPublishTry >= VEL_PUBLISH_MIN_MS)) {
     lastVelPublishTry = now;
     if (velPub && velPublishPercent >= 0) {
@@ -219,8 +238,17 @@ void ensureMqttConnected() {
       snprintf(msg, sizeof(msg), "%d", velPublishPercent);
       bool ok = velPub->publish(msg);
       Serial.printf("[MQTT] publish %s = %s%% -> %s\n", TOPIC_GET_VEL, msg, ok ? "ok" : "falhou");
-      if (ok) 
-        velPublishPending = false; // se falhar, tenta de novo no próximo ciclo
+      if (ok) velPublishPending = false;
+    }
+  }
+
+  if (autoPublishPending && (now - lastAutoPublishTry >= AUTO_PUBLISH_MIN_MS)) {
+    lastAutoPublishTry = now;
+    if (autoPub) {
+      const char* msg = modoAutomatico ? "ON" : "OFF";
+      bool ok = autoPub->publish(msg);
+      Serial.printf("[MQTT] publish %s = %s -> %s\n", TOPIC_GET_AUTO, msg, ok ? "ok" : "falhou");
+      if (ok) autoPublishPending = false;
     }
   }
 }
@@ -233,11 +261,11 @@ void applyDuty(int duty_0_255) {
 
 void scheduleVelPublish() {
   velPublishPercent  = (int)round((100.0/255.0) * (double)DutyciclePWM);
-  velPublishPending  = true; 
+  velPublishPending  = true;
 }
 
+/* -------------------- Callbacks de inscrição -------------------- */
 void onSetVelMsg(const char* payload) {
-  // funciona com 0–255 ou 0–100%
   int v = atoi(payload);
   bool temPercent = strchr(payload, '%') != nullptr;
   if (temPercent || (v >= 0 && v <= 100)) {
@@ -253,10 +281,31 @@ void onSetVelMsg(const char* payload) {
   scheduleVelPublish();
 }
 
+static bool parseBoolPayload(const char* p) {
+  String s = String(p);
+  s.trim(); s.toLowerCase();
+  if (s=="1" || s=="on" || s=="true" || s=="enable" || s=="enabled") return true;
+  return false; // "0","off","false", etc false
+}
+
+void onSetAutoMsg(const char* payload) {
+  bool novo = parseBoolPayload(payload);
+  if (modoAutomatico != novo) {
+    modoAutomatico = novo;
+    saveAutoToPrefs();    // persiste
+    Serial.printf("[MQTT] %s: '%s' -> auto=%s\n", TOPIC_SET_AUTO, payload, modoAutomatico?"ON":"OFF");
+  }
+  scheduleAutoPublish();  // republica para sincronizar
+}
+
+void scheduleAutoPublish() {
+  autoPublishPending = true;
+}
+
 /* -------------------- AP e Rotas -------------------- */
 void iniciarModoAP() {
   modoConfiguracao = true;
-  WiFi.softAP("Ventilador-Config", "12345678");
+  WiFi.softAP("Termometro-Config", "12345678");
   IPAddress ip = WiFi.softAPIP();
   Serial.printf("AP iniciado. IP: %s\n", ip.toString().c_str());
 
@@ -267,14 +316,12 @@ void iniciarModoAP() {
 }
 
 void iniciarRotasHTTP() {
- 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest* req) {
-    if (modoConfiguracao) 
-      req->send_P(200, "text/html", paginaConfig);
-    else                  
-      req->send_P(200, "text/html", paginaParametros);
+    if (modoConfiguracao) req->send_P(200, "text/html", paginaConfig);
+    else                  req->send_P(200, "text/html", paginaParametros);
   });
 
+  // wifi,senha,ip,user,pass,local
   server.on("/configurar", HTTP_POST,
     [](AsyncWebServerRequest* request) {},
     NULL,
@@ -299,12 +346,13 @@ void iniciarRotasHTTP() {
 
   // Recuperar configs (CSV)
   server.on("/recuperarConfigs", HTTP_GET, [](AsyncWebServerRequest* request) {
-    String dados = CONFIG.nomeWifi + "," + CONFIG.senhaWifi + "," + CONFIG.ipBroker + "," + CONFIG.userBroker + "," + CONFIG.passBroker + "," + CONFIG.local;
+    String dados = CONFIG.nomeWifi + "," + CONFIG.senhaWifi + "," + CONFIG.ipBroker + "," +
+                   CONFIG.userBroker + "," + CONFIG.passBroker + "," + CONFIG.local;
     if (CONFIG.nomeWifi == "") request->send(404, "text/plain", "Sem configuracao");
     else                       request->send(200, "text/plain", dados);
   });
 
-  // SET dutycicle (0..255 ou XX%) tbm agenda publish no topico
+  // SET dutycicle (0..255 ou XX%)
   server.on("/set_dutycicle", HTTP_GET, [](AsyncWebServerRequest* request) {
     if (!request->hasParam("dutycicle")) {
       request->send(400, "text/plain", "FALTA O PARAMETRO dutycicle");
@@ -319,14 +367,14 @@ void iniciarRotasHTTP() {
     dutyint = clampi(dutyint, 0, 255);
 
     applyDuty(dutyint);
-    scheduleVelPublish(); 
+    scheduleVelPublish();
 
     char buf[64];
     snprintf(buf, sizeof(buf), "Velocidade atualizada para %.1f%%", (100.0/255.0) * (double)dutyint);
     request->send(200, "text/plain", buf);
   });
 
-  // dutycicle atual sincronização do knob
+  // dutycicle atual
   server.on("/get_dutycicle", HTTP_GET, [](AsyncWebServerRequest* request) {
     StaticJsonDocument<128> j;
     j["duty"]    = DutyciclePWM;
@@ -335,7 +383,7 @@ void iniciarRotasHTTP() {
     request->send(200, "application/json", out);
   });
 
-  // temperaturas (vindas dos termometros MQTT)
+  // temperaturas (vindas do MQTT)
   server.on("/get_temperaturas", HTTP_GET, [](AsyncWebServerRequest* request) {
     StaticJsonDocument<128> j;
     if (!isnan(temperaturaInterna)) j["interna"] = temperaturaInterna;
@@ -344,10 +392,38 @@ void iniciarRotasHTTP() {
     request->send(200, "application/json", out);
   });
 
+  // Modo automático 
+  server.on("/get_automatico", HTTP_GET, [](AsyncWebServerRequest* request) {
+    StaticJsonDocument<64> j;
+    j["auto"] = modoAutomatico;
+    String out; serializeJson(j, out);
+    request->send(200, "application/json", out);
+  });
+
+  server.on("/set_automatico", HTTP_GET, [](AsyncWebServerRequest* request) {
+    if (!request->hasParam("on")) {
+      request->send(400, "text/plain", "Falta parametro 'on'");
+      return;
+    }
+    String v = request->getParam("on")->value();
+    bool novo = false;
+    { // parse
+      String s=v; s.trim(); s.toLowerCase();
+      if (s=="1"||s=="on"||s=="true"||s=="enable"||s=="enabled") novo=true;
+      else novo=false;
+    }
+    if (modoAutomatico != novo) {
+      modoAutomatico = novo;
+      saveAutoToPrefs(); 
+    }
+    scheduleAutoPublish();
+    request->send(200, "text/plain", String("Modo automático: ") + (modoAutomatico?"ON":"OFF"));
+  });
+
   // Resetar configs
   server.on("/resetar_config", HTTP_POST, [](AsyncWebServerRequest* request) {
-    prefs.begin("config", false); 
-    prefs.clear(); 
+    prefs.begin("config", false);
+    prefs.clear();
     prefs.end();
     request->send(200, "text/plain", "Reset OK");
     delay(1000);
@@ -359,21 +435,18 @@ void iniciarRotasHTTP() {
   });
 }
 
+/* -------------------- Hard reset ------------------- */
 void checkBotaoHardReset() {
   static bool holding = false;
   static unsigned long t0 = 0;
   if (digitalRead(BTN_RESET) == LOW) {
-    if (!holding) {
-      holding = true;
-      t0 = millis();
-    } else {
-      if (millis() - t0 >= RESET_HOLD_MS) {
-        prefs.begin("config", false);
-        prefs.clear();
-        prefs.end();
-        delay(50);
-        ESP.restart();
-      }
+    if (!holding) { holding = true; t0 = millis(); }
+    else if (millis() - t0 >= RESET_HOLD_MS) {
+      prefs.begin("config", false);
+      prefs.clear();
+      prefs.end();
+      delay(50);
+      ESP.restart();
     }
   } else {
     holding = false;
@@ -382,7 +455,6 @@ void checkBotaoHardReset() {
 
 void setup() {
   Serial.begin(115200);
-  pinMode(LED, OUTPUT);
   pinMode(PWM_PINO, OUTPUT);
   pinMode(BTN_RESET, INPUT_PULLUP);
 
@@ -393,6 +465,7 @@ void setup() {
   Serial.println("\nBoot...");
 
   carregarConfigs();
+  loadAutoFromPrefs();
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(CONFIG.nomeWifi.c_str(), CONFIG.senhaWifi.c_str());
@@ -406,8 +479,7 @@ void setup() {
 
   if (WiFi.status() != WL_CONNECTED) {
     iniciarModoAP();
-  } 
-  else {
+  } else {
     modoConfiguracao = false;
     Serial.printf("\nConectado. IP: %s\n", WiFi.localIP().toString().c_str());
 
@@ -419,12 +491,14 @@ void setup() {
       CONFIG.passBroker.c_str()
     );
 
-    // Subscriptions / Publish
     setVelSub  = new Adafruit_MQTT_Subscribe(mqtt, TOPIC_SET_VEL, MQTT_QOS_1);
-    tempIntSub = new Adafruit_MQTT_Subscribe(mqtt, "sensores/temperatura/interna", MQTT_QOS_1);
-    tempExtSub = new Adafruit_MQTT_Subscribe(mqtt, "sensores/temperatura/externa", MQTT_QOS_1);
+    tempIntSub = new Adafruit_MQTT_Subscribe(mqtt, TOPIC_TEMP_INT, MQTT_QOS_1);
+    tempExtSub = new Adafruit_MQTT_Subscribe(mqtt, TOPIC_TEMP_EXT, MQTT_QOS_1);
+    autoSub    = new Adafruit_MQTT_Subscribe(mqtt, TOPIC_SET_AUTO, MQTT_QOS_1);
+
     velPub     = new Adafruit_MQTT_Publish(mqtt, TOPIC_GET_VEL);
-    // primeira tentativa de conexão
+    autoPub    = new Adafruit_MQTT_Publish(mqtt, TOPIC_GET_AUTO);
+
     doMqttConnect();
   }
 
@@ -438,7 +512,5 @@ void loop() {
     ensureWiFiConnected();
     ensureMqttConnected();
   }
-
   checkBotaoHardReset();
 }
-

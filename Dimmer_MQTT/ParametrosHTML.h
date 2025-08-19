@@ -92,12 +92,11 @@ static const char paginaParametros[] PROGMEM = R"rawliteral(
       radial-gradient(closest-side, rgba(255,255,255,.08), rgba(255,255,255,.03) 60%, transparent 61%) padding-box,
       conic-gradient(#60a5fa var(--pct), rgba(255,255,255,.10) 0) border-box;
     border: 10px solid transparent;
-    background-clip: padding-box, border-box; /* evita sumiço >70% */
+    background-clip: padding-box, border-box;
     box-shadow: inset 0 0 0 2px rgba(255,255,255,.08), 0 30px 70px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,.06);
     cursor:grab; user-select:none; touch-action:none;
   }
   .knob:active{cursor:grabbing}
-  /* FIX: escopar o “dot” do knob para não afetar a bolinha de conexão */
   .knob .dot{
     position:absolute; width:10px; height:10px; border-radius:50%; background:#fff;
     box-shadow:0 0 0 6px rgba(96,165,250,.18), 0 0 0 1px rgba(255,255,255,.8) inset;
@@ -119,9 +118,29 @@ static const char paginaParametros[] PROGMEM = R"rawliteral(
   .pill{display:inline-flex; align-items:center; gap:8px; padding:7px 10px;
     background:rgba(59,130,246,.14); border:1px solid rgba(255,255,255,.12);
     border-radius:999px; color:#dceaff; font-weight:600; letter-spacing:.2px; font-size:13px}
-  .actions{display:flex; align-items:center; justify-content:flex-start; gap:10px; margin-top:10px}
+  .actions{display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-top:10px}
 
-  /* Temperatura (central, duas leituras) */
+  /* ---------- Toggle Modo Automático (NOVO) ---------- */
+  .toggle{
+    --w: 64px; --h: 34px; --p: 4px;
+    position:relative; width:var(--w); height:var(--h);
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18);
+    border-radius:999px; transition:.2s background,.2s border-color; cursor:pointer; flex:0 0 auto;
+  }
+  .toggle input{display:none}
+  .thumb{
+    position:absolute; top:var(--p); left:var(--p);
+    width:calc(var(--h) - 2*var(--p)); height:calc(var(--h) - 2*var(--p));
+    border-radius:50%; background:#fff; box-shadow:0 2px 10px rgba(0,0,0,.35);
+    transition:.22s left, .22s transform;
+  }
+  .toggle.on{ background:rgba(59,130,246,.35); border-color:rgba(59,130,246,.55) }
+  .toggle.on .thumb{ left:calc(var(--w) - var(--h) + var(--p)); transform:rotate(0.0001deg) }
+  .toggle-label{display:flex; align-items:center; gap:10px; font-weight:700; color:#dbeafe}
+  .toggle-badge{padding:6px 10px; border-radius:999px; border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.06); font-size:12px}
+  /* --------------------------------------------------- */
+
+  /* Temperatura */
   .tempBox{display:grid; place-items:center; text-align:center; padding:18px 6px}
   .temps{display:grid; gap:10px; min-width:220px}
   .trow{display:flex; align-items:center; justify-content:center; gap:10px}
@@ -209,6 +228,13 @@ static const char paginaParametros[] PROGMEM = R"rawliteral(
           </div>
           <div class="actions">
             <div class="pill">Velocidade Atual: <strong id="pillDuty">0%</strong></div>
+
+            <!-- NOVO: Toggle Modo Automático -->
+            <div class="toggle-label" title="Liga/Desliga controle automático">
+              <span>Modo Automático</span>
+              <div id="autoToggle" class="toggle"><input type="checkbox" id="autoChk"><div class="thumb"></div></div>
+              <span id="autoBadge" class="toggle-badge">OFF</span>
+            </div>
           </div>
         </div>
 
@@ -289,18 +315,23 @@ static const char paginaParametros[] PROGMEM = R"rawliteral(
   const fPass = document.getElementById('f_pass');
   const fLocal= document.getElementById('f_local');
 
+  // Modo automático UI
+  const autoToggle = document.getElementById('autoToggle');
+  const autoChk    = document.getElementById('autoChk');
+  const autoBadge  = document.getElementById('autoBadge');
+
   // Estado
   let value = 0; // 0..255
   let dragging = false;
-  let angleStart = 0; // ângulo (top-based) no início do drag
-  let valueStart = 0; // valor inicial no início do drag
+  let angleStart = 0;
+  let valueStart = 0;
   let lastOkTs = 0;
   let lastToastTs = 0;
 
   const clamp = (n,min,max)=>Math.min(Math.max(n,min),max);
   const pctOf = v => Math.round((v/255)*100);
 
-  function angleFromValue(v){ return -135 + 270*(v/255); }            // -135..+135
+  function angleFromValue(v){ return -135 + 270*(v/255); }
   function valueFromAngle(a){ const t=(a+135)/270; return Math.round(clamp(t,0,1)*255); }
   function normAngle(a){ while(a>180)a-=360; while(a<-180)a+=360; return a; }
   function angleDiff(a,b){ return normAngle(a-b); }
@@ -308,21 +339,20 @@ static const char paginaParametros[] PROGMEM = R"rawliteral(
     const r = knob.getBoundingClientRect();
     const cx = r.left + r.width/2, cy = r.top + r.height/2;
     const dx = e.clientX - cx,     dy = e.clientY - cy;
-    return Math.atan2(dx, -dy) * 180/Math.PI; // 0° topo, horário positivo
+    return Math.atan2(dx, -dy) * 180/Math.PI;
   }
 
   function setVisual(v){
     value = clamp(v,0,255);
     const pct = pctOf(value);
     const ang = angleFromValue(value);
-    knob.style.setProperty('--pct', ((value/255)*100).toFixed(2) + '%'); // FIX 70%+
+    knob.style.setProperty('--pct', ((value/255)*100).toFixed(2) + '%');
     knob.style.setProperty('--angle', ang+'deg');
     knob.setAttribute('aria-valuenow', value);
     pctVal.textContent = String(pct);
     pillDuty.textContent = pct + '%';
   }
 
-  // Toast único
   function toast(msg, kind='ok'){
     statusBox.innerHTML = '';
     const el = document.createElement('div');
@@ -340,7 +370,7 @@ static const char paginaParametros[] PROGMEM = R"rawliteral(
   }
   setInterval(updateConnVisual, 1000);
 
-  // GET /set_dutycicle imediato
+  // ---- DUTY ----
   let lastAbort = null;
   async function sendDuty(v){
     try{
@@ -359,7 +389,6 @@ static const char paginaParametros[] PROGMEM = R"rawliteral(
     }
   }
 
-  // Drag relativo (grab)
   knob.addEventListener('pointerdown', (e)=>{
     dragging = true;
     knob.setPointerCapture(e.pointerId);
@@ -380,17 +409,15 @@ static const char paginaParametros[] PROGMEM = R"rawliteral(
     try{knob.releasePointerCapture(e.pointerId);}catch(_){}
   });
 
-  // Teclado (passos)
   knob.addEventListener('keydown', (e)=>{
     let step = (e.shiftKey? 15 : 5);
     if (e.key === 'ArrowRight' || e.key === 'ArrowUp'){ setVisual(value+step); sendDuty(value); }
     if (e.key === 'ArrowLeft'  || e.key === 'ArrowDown'){ setVisual(value-step); sendDuty(value); }
   });
 
-  // Inicial
   setVisual(0);
 
-  // Temperaturas (via firmware REST que lê MQTT)
+  // ---- TEMPERATURAS ----
   async function refreshTemps(){
     try{
       const r = await fetch('/get_temperaturas');
@@ -398,14 +425,14 @@ static const char paginaParametros[] PROGMEM = R"rawliteral(
       const j = await r.json();
       const ti = parseFloat(j.interna);
       const te = parseFloat(j.externa);
-      if (!isNaN(ti)) tempIntEl.textContent = ti.toFixed(1);
-      if (!isNaN(te)) tempExtEl.textContent = te.toFixed(1);
+      if (!isNaN(ti)) document.getElementById('tempInt').textContent = ti.toFixed(1);
+      if (!isNaN(te)) document.getElementById('tempExt').textContent = te.toFixed(1);
       lastOkTs = Date.now(); updateConnVisual();
     }catch(_){}
   }
   refreshTemps(); setInterval(refreshTemps, 2000);
 
-  // Sincronização do duty (reflete alterações externas)
+  // ---- SYNC DUTY (externo) ----
   let syncBusy = false;
   async function refreshDuty(){
     if (dragging || syncBusy) return;
@@ -465,7 +492,46 @@ static const char paginaParametros[] PROGMEM = R"rawliteral(
     }catch(_){ toast('Falha ao enviar configurações','err'); }
   });
 
-  /* ========= Easter Egg: segurar 7s o ícone ========= */
+  /* ========= MODO AUTOMÁTICO ========= */
+  function setAutoVisual(on){
+    autoToggle.classList.toggle('on', !!on);
+    autoChk.checked = !!on;
+    autoBadge.textContent = on ? 'ON' : 'OFF';
+  }
+
+  async function loadAuto(){
+    try{
+      const r = await fetch('/get_automatico');
+      if(!r.ok) throw new Error();
+      const j = await r.json();
+      const on = !!j.auto;
+      setAutoVisual(on);
+      lastOkTs = Date.now(); updateConnVisual();
+    }catch(_){}
+  }
+
+  async function setAuto(on){
+    try{
+      const r = await fetch(`/set_automatico?on=${on ? '1' : '0'}`);
+      if(!r.ok) throw new Error();
+      setAutoVisual(on);
+      toast(`Modo automático ${on?'ativado':'desativado'}`, 'ok');
+      lastOkTs = Date.now(); updateConnVisual();
+    }catch(_){
+      toast('Falha ao alterar modo automático', 'err');
+      // reverte visual em caso de erro
+      await loadAuto();
+    }
+  }
+
+  autoToggle.addEventListener('click', ()=>{
+    setAuto(!autoChk.checked);
+  });
+
+  loadAuto();
+  setInterval(loadAuto, 3000); // sincroniza com mudanças externas (via MQTT)
+
+  /* ========= Easter Egg ========= */
   const logo = document.getElementById('logoEgg');
   const egg = document.getElementById('egg');
   let eggTimer = null;
@@ -480,7 +546,7 @@ static const char paginaParametros[] PROGMEM = R"rawliteral(
 
   function startEggTimer(){
     if (eggTimer) clearTimeout(eggTimer);
-    eggTimer = setTimeout(showEgg, 7000); // 7s segurando
+    eggTimer = setTimeout(showEgg, 7000);
   }
   function cancelEggTimer(){
     if (eggTimer){ clearTimeout(eggTimer); eggTimer=null; }
@@ -490,7 +556,6 @@ static const char paginaParametros[] PROGMEM = R"rawliteral(
   logo.addEventListener('pointerup', cancelEggTimer);
   logo.addEventListener('pointerleave', cancelEggTimer);
   logo.addEventListener('pointercancel', cancelEggTimer);
-
 })();
 </script>
 </body>
