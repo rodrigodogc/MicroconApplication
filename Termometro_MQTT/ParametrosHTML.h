@@ -1,301 +1,218 @@
+#pragma once
 static const char paginaParametros[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-br">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Temperaturas DEE</title>
-  <style>
-    :root {
-      --primary-color: #005a9c;  /* Azul UFPE */
-      --secondary-color: #f0f2f5;
-      --text-color: #333;
-      --border-radius: 8px;
-    }
-    html {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    }
-    body {
-      margin: 0;
-      padding-top: 80px;  
-      background-color: var(--secondary-color);
-      color: var(--text-color);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-    nav {
-      display: flex;
-      align-items: center;
-      justify-content: space-between; 
-      background: #fff;
-      padding: 0 2rem;
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 70px;
-      z-index: 1000;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-      box-sizing: border-box;
-    }
-    .logo {
-      height: 56px;
-      width: auto;
-      margin-right: 1.2rem;
-    }
-    .nav-title {
-      font-size: 1.4rem;
-      font-weight: 600;
-      color: var(--primary-color);
-      margin-right: 2rem;
-      white-space: nowrap;
-    }
-    .nav-buttons button {
-      background: none;
-      color: var(--text-color);
-      border: none;
-      padding: 1rem 0.8rem;
-      margin: 0 0.2rem;
-      cursor: pointer;
-      font-size: 1rem;
-      font-weight: 500;
-      border-bottom: 3px solid transparent;
-      transition: all 0.3s ease;
-    }
-    .nav-buttons button:hover {
-      color: var(--primary-color);
-    }
-    .nav-buttons button.active {
-      color: var(--primary-color);
-      border-bottom: 3px solid var(--primary-color);
-    }
-    .section-box {
-      background: #fff;
-      border-radius: var(--border-radius);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-      padding: 2rem;
-      margin-top: 2rem;
-      max-width: 500px;
-      width: 90%;
-      box-sizing: border-box;
-      text-align: center;
-    }
-    .hidden { display: none; }
-    h2 { margin-top: 0; color: var(--primary-color); }
-    .gauge-container {
-      width: 420px;
-      height: 340px;
-      margin: 2rem auto 0 auto;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .justgage .value {      /* aumenta a fonte do valor da temperatura */
-      font-size: 4.2rem !important;
-      font-weight: bold;
-    }
-    .config-form {
-      display: flex;
-      flex-direction: column;
-      text-align: left;
-    }
-    .form-group { margin-bottom: 1rem; }
-    .form-group label {
-      display: block;
-      margin-bottom: 0.3rem;
-      font-weight: 500;
-    }
-    .form-group input {
-      width: 100%;
-      padding: 0.7rem;
-      border: 1px solid #ccc;
-      border-radius: var(--border-radius);
-      font-size: 1rem;
-      box-sizing: border-box;
-    }
-    .form-group input:focus {
-      outline: none;
-      border-color: var(--primary-color);
-      box-shadow: 0 0 5px rgba(0, 90, 156, 0.3);
-    }
-    .config-form button {
-      padding: 0.8rem;
-      font-size: 1rem;
-      background: var(--primary-color);
-      color: #fff;
-      border: none;
-      border-radius: var(--border-radius);
-      cursor: pointer;
-      width: 100%;
-    }
-    #statusMsg { margin-top: 1rem; font-size: .9rem; }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>DEE • Monitor de Temperatura</title>
+<style>
+  :root{
+    --blue-900:#0a2540; --blue-800:#113a6b; --blue-700:#1a4d8f;
+    --blue-600:#2a6fdb; --blue-500:#3b82f6; --blue-400:#60a5fa; --blue-300:#93c5fd;
+    --bg: radial-gradient(1200px 900px at 20% -10%, rgba(59,130,246,.25), transparent 60%),
+          radial-gradient(1200px 900px at 120% 10%, rgba(37,99,235,.30), transparent 60%),
+          linear-gradient(180deg, #0b1220 0%, #0a2540 100%);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  body{
+    margin:0; background:var(--bg); color:#e8eefc;
+    font:15px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu;
+    min-height:100vh; display:flex; flex-direction:column;
+  }
+  .topbar{
+    position:sticky; top:0; z-index:50; display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:12px 16px; backdrop-filter: blur(10px) saturate(140%);
+    background:linear-gradient(180deg, rgba(10,37,64,.9), rgba(10,37,64,.55));
+    border-bottom:1px solid rgba(255,255,255,.06);
+  }
+  .brand{display:flex; align-items:center; gap:10px}
+  .logo{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;
+    background:conic-gradient(from 220deg, var(--blue-300), var(--blue-600), var(--blue-400));
+    box-shadow:inset 0 6px 22px rgba(59,130,246,.35)}
+  .brand h1{margin:0;font-size:16px;font-weight:800;color:#dbeafe}
+  .rightbar{display:flex;align-items:center;gap:10px}
+  .conn{display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:999px;font-weight:700;
+    color:#dceaff;font-size:13px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12)}
+  .conn .dot{width:10px;height:10px;border-radius:50%;background:#94a3b8}
+  .conn.online .dot{background:#22c55e;animation:pulse 1.6s infinite ease-in-out}
+  @keyframes pulse{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(34,197,94,.45)}50%{transform:scale(1.15);box-shadow:0 0 0 6px rgba(34,197,94,.05)}}
+  .ghost{display:inline-flex;align-items:center;gap:8px;padding:10px 12px;border-radius:12px;font-weight:700;
+    border:1px solid rgba(255,255,255,.12);color:#dbeafe;background:rgba(59,130,246,.12);cursor:pointer}
+  .wrap{flex:1;display:grid;place-items:center;padding:20px}
+  .card{width:min(920px,96vw);background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.08);
+    border-radius:20px;padding:20px;box-shadow:0 24px 80px rgba(3,24,66,.45), inset 0 1px 0 rgba(255,255,255,.06)}
+  .title{display:flex;align-items:center;justify-content:space-between;margin:0 0 10px;font-size:15px;color:#cfe4ff;font-weight:800}
+  .grid{display:grid;gap:18px;grid-template-columns:1fr}
+  .box{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:14px;text-align:center}
+  .pill{display:inline-flex;align-items:center;gap:8px;padding:7px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(59,130,246,.14);font-weight:700}
+  #gaugeWrap{display:flex;align-items:center;justify-content:center;min-height:320px}
+  #topicLabel{color:#bad6ff;font-weight:700;margin-top:8px}
+  .status{position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:60;width:min(92vw,520px);display:flex;justify-content:center;pointer-events:none}
+  .toast{background:rgba(10,37,64,.90);border:1px solid rgba(255,255,255,.10);color:#e6f0ff;border-radius:12px;padding:10px 12px;font-size:13px;box-shadow:0 14px 40px rgba(0,0,0,.35)}
+  /* Modal */
+  .modal-backdrop{position:fixed;inset:0;background:rgba(3,8,20,.6);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;z-index:80}
+  .modal{width:min(560px,92vw);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10);border-radius:16px;padding:14px}
+  .modal h3{margin:0 0 10px;font-size:18px;color:#e6f0ff}
+  .fgrid{display:grid;gap:10px;grid-template-columns:1fr 1fr}
+  .fgrid .full{grid-column:1/-1}
+  .field{display:flex;flex-direction:column;gap:6px}
+  .field label{font-size:12px;color:#b7c6e6}
+  .field input{padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.08);color:#eaf2ff;outline:none;font-size:15px}
+  .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:10px}
+  @media (max-width:560px){ .fgrid{grid-template-columns:1fr} .wrap{padding:14px} .card{padding:14px} }
+</style>
 </head>
 <body>
-  <nav>
-    <div style="display: flex; align-items: center;">
-      <img src="https://upload.wikimedia.org/wikipedia/commons/8/85/Bras%C3%A3o_da_UFPE.png" alt="Logo UFPE" class="logo">
-      <span class="nav-title">Monitor de temperatura (<span id="navLocal">Local</span>)</span>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2v6M12 16v6M4 12h6M14 12h6"/><circle cx="12" cy="12" r="5"></circle>
+        </svg>
+      </div>
+      <h1>DEE • Monitor de Temperatura</h1>
     </div>
-    <div class="nav-buttons">
-      <button id="btnMonitor" class="active">Monitoramento</button>
-      <button id="btnConfig">Configurações</button>
+    <div class="rightbar">
+      <div id="connTag" class="conn"><span class="dot"></span><span id="connText">Offline</span></div>
+      <button id="btnConfig" class="ghost">Configurar</button>
     </div>
-  </nav>
+  </header>
 
-  <div id="monitorBox" class="section-box">
-    <h2>Monitoramento de Temperatura</h2>
-    <div id="gauge" class="gauge-container"></div>
+  <main class="wrap">
+    <section class="card">
+      <h2 class="title">Temperatura</h2>
+      <div class="grid">
+        <div class="box">
+          <div id="gaugeWrap"><div id="gauge"></div></div>
+          <div id="topicLabel">Tópico: <strong id="topicVal">--</strong></div>
+          <div class="pill" style="margin-top:10px;">Local: <strong id="locVal" style="margin-left:6px;">--</strong></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="status" id="status"></div>
+
+  <!-- Modal Config -->
+  <div class="modal-backdrop" id="modalConfig">
+    <div class="modal">
+      <h3>Configurações de Rede e MQTT</h3>
+      <form id="formConfig">
+        <div class="fgrid">
+          <div class="field"><label>Wi-Fi (SSID)</label><input id="f_wifi" placeholder="Nome da rede" required /></div>
+          <div class="field"><label>Senha Wi-Fi</label><input id="f_senha" type="password" placeholder="********" /></div>
+          <div class="field"><label>IP do Broker</label><input id="f_ip" placeholder="192.168.0.10" required /></div>
+          <div class="field"><label>Usuário MQTT</label><input id="f_user" placeholder="(opcional)" /></div>
+          <div class="field"><label>Senha MQTT</label><input id="f_pass" type="password" placeholder="(opcional)" /></div>
+          <div class="field"><label>Tópico de publicação</label><input id="f_topic" placeholder="sensores/temperatura/interna" /></div>
+          <div class="field full"><label>Local</label><input id="f_local" placeholder="Ex.: Linha 1 • Forno A" /></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="ghost" id="btnCloseConfig">Cancelar</button>
+          <button type="submit" class="ghost">Salvar & Enviar</button>
+        </div>
+      </form>
+    </div>
   </div>
 
-  <div id="configBox" class="section-box hidden">
-    <h2>Configuração Wi-Fi / MQTT</h2>
-    <form class="config-form" id="configForm">
-      <div class="form-group">
-        <label for="ssid">SSID Wi-Fi</label>
-        <input type="text" id="ssid" placeholder="Nome da rede">
-      </div>
-      <div class="form-group">
-        <label for="wifiPass">Senha Wi-Fi</label>
-        <input type="password" id="wifiPass" placeholder="Senha da rede">
-      </div>
-      <div class="form-group">
-        <label for="mqttHost">Host Broker MQTT</label>
-        <input type="text" id="mqttHost" placeholder="IP ou domínio">
-      </div>
-      <div class="form-group">
-        <label for="mqttUser">Usuário MQTT</label>
-        <input type="text" id="mqttUser" placeholder="Usuário">
-      </div>
-      <div class="form-group">
-        <label for="mqttPass">Senha MQTT</label>
-        <input type="password" id="mqttPass" placeholder="Senha">
-      </div>
-      <div class="form-group">
-        <label for="local">Local</label>
-        <input type="text" id="local" placeholder="Ex: Laboratório 1">
-      </div>
-      <button type="submit">Salvar Configurações</button>
-      <div id="statusMsg"></div>
-    </form>
-  </div>
-
-  <!-- bibliotecas necessárias pro gauge -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/raphael/2.3.0/raphael.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/justgage/1.6.1/justgage.min.js"></script>
 
-  <script>
-    const btnMonitor = document.getElementById('btnMonitor');
-    const btnConfig  = document.getElementById('btnConfig');
-    const monitorBox = document.getElementById('monitorBox');
-    const configBox  = document.getElementById('configBox');
-    const navLocal   = document.getElementById('navLocal');
+<script>
+(function(){
+  const statusBox = document.getElementById('status');
+  const connTag   = document.getElementById('connTag');
+  const connText  = document.getElementById('connText');
+  const topicVal  = document.getElementById('topicVal');
+  const locVal    = document.getElementById('locVal');
 
-    /* Instancia o gauge */
-    const gauge = new JustGage({
-      id: 'gauge',
-      value: 0,
-      min: 0,
-      max: 50,
-      title: 'Temperatura',
-      label: '°C',
-      levelColors: ['#007bff', '#f9c851', '#ff4500'],
-      pointer: true,
-      pointerOptions: { color: '#333' },
-      gaugeWidthScale: 0.6,
-      decimals: 2,
-      counter: true
-    });
+  const btnConfig = document.getElementById('btnConfig');
+  const modalConfig = document.getElementById('modalConfig');
+  const btnCloseConfig = document.getElementById('btnCloseConfig');
+  const fWifi  = document.getElementById('f_wifi');
+  const fSenha = document.getElementById('f_senha');
+  const fIp    = document.getElementById('f_ip');
+  const fUser  = document.getElementById('f_user');
+  const fPass  = document.getElementById('f_pass');
+  const fTopic = document.getElementById('f_topic');
+  const fLocal = document.getElementById('f_local');
 
-    const $ = id => document.getElementById(id);
-    const status = msg => { $('statusMsg').innerText = msg; };
+  let lastOkTs = 0;
 
-    /* Lê configuração salva ao carregar a página e começa a atualizar a temperatura*/
-    document.addEventListener('DOMContentLoaded', async () => {
-      status('Carregando configuração...');
-      try {
-        const r = await fetch('/recuperarConfigs');
-        if (!r.ok) throw new Error(await r.text());
-        const csv = await r.text();
-        // preenche o formulário com os dadosda esp quando a pag carrega
-        const [ssid,pwd,ip,user,pass,local] = csv.split(',');
-          $('ssid').value      = ssid  ?? '';
-          $('wifiPass').value  = pwd   ?? '';
-          $('mqttHost').value  = ip    ?? '';
-          $('mqttUser').value  = user  ?? '';
-          $('mqttPass').value  = pass  ?? '';
-          $('local').value     = local ?? '';
-          navLocal.textContent = local || 'Local';
-        status('Configuração carregada.');
-      } catch {
-        status('Sem configuração salva.');
-      }
+  function updateConnVisual(){
+    const online = (Date.now() - lastOkTs) < 6000;
+    connTag.classList.toggle('online', online);
+    connText.textContent = online ? 'Conectado' : 'Offline';
+  }
+  setInterval(updateConnVisual, 1000);
 
-      const atualizarTemp = async () => {
-        const response = await fetch('/get_temperatura');
-        const data = await response.json();
-        console.log(data);
-        const temp = parseFloat(data.temp);
-        if (!isNaN(temp)) {
-          gauge.refresh(temp);
-          console.log('Temperatura atualizada: ' + temp);
-        }
-        return true;
-      }
+  function toast(msg){
+    statusBox.innerHTML = '<div class="toast">'+msg+'</div>';
+    setTimeout(()=>{ statusBox.innerHTML=''; }, 2200);
+  }
 
-      setInterval(() => {
-        atualizarTemp();
-      }, 4000);
-    });
+  function openModal(){ modalConfig.style.display='flex'; }
+  function closeModal(){ modalConfig.style.display='none'; }
+  btnConfig.addEventListener('click', openModal);
+  btnCloseConfig.addEventListener('click', closeModal);
+  modalConfig.addEventListener('click', (e)=>{ if(e.target===modalConfig) closeModal(); });
 
-    /* Navegação */
-    function switchView(view) {
-      if (view === 'monitor') {
-        btnMonitor.classList.add('active');
-        btnConfig .classList.remove('active');
-        monitorBox.classList.remove('hidden');
-        configBox .classList.add   ('hidden');
-      } else {
-        btnConfig .classList.add   ('active');
-        btnMonitor.classList.remove('active');
-        configBox .classList.remove('hidden');
-        monitorBox.classList.add   ('hidden');
-      }
-    }
-    btnMonitor.addEventListener('click', () => switchView('monitor'));
-    btnConfig .addEventListener('click', () => switchView('config' ));
+  // Gauge
+  const gauge = new JustGage({
+    id: 'gauge', value: 0, min: -10, max: 60,
+    title: 'Temperatura', label: '°C',
+    pointer: true, pointerOptions: { color: '#e8eefc' },
+    levelColors: ['#60a5fa','#facc15','#f87171'],
+    gaugeWidthScale: 0.6, decimals: 1, counter: true
+  });
 
-    /* Envia CSV para /configurar */
-    document.getElementById('configForm').addEventListener('submit', async e => {
-      e.preventDefault();
-      const csv = [
-        $('ssid').value,
-        $('wifiPass').value,
-        $('mqttHost').value,
-        $('mqttUser').value,
-        $('mqttPass').value,
-        $('local').value
-      ].join(',');
+  async function preloadConfigs(){
+    try{
+      const r = await fetch('/recuperarConfigs');
+      if(!r.ok) throw new Error();
+      const csv = await r.text();
+      const parts = csv.split(','); // wifi,senha,ip,user,pass,topic,local
+      fWifi.value  = parts[0]||'';
+      fSenha.value = parts[1]||'';
+      fIp.value    = parts[2]||'';
+      fUser.value  = parts[3]||'';
+      fPass.value  = parts[4]||'';
+      fTopic.value = parts[5]||'sensores/temperatura/interna';
+      fLocal.value = parts[6]||'';
+      topicVal.textContent = fTopic.value || '--';
+      locVal.textContent   = fLocal.value || '--';
+    }catch(_){}
+  }
+  preloadConfigs();
 
-      status('Enviando configurações...');
-      try {
-        const r = await fetch('/configurar', {
-          method : 'POST',
-          headers: { 'Content-Type': 'text/plain' },
-          body   : csv
-        });
-        if (!r.ok) throw new Error(await r.text());
-        localStorage.setItem('local', $('local').value);
-        navLocal.textContent = $('local').value || 'Local';
-        status('Configurações salvas! Reiniciando dispositivo...');
-        alert('Configurações salvas. O dispositivo vai reiniciar.');
-      } catch (err) {
-        status(`Erro ao salvar: ${err.message}`);
-      }
-    });
-  </script>
+  async function refreshTemp(){
+    try{
+      const r = await fetch('/get_temperatura');
+      if(!r.ok) throw new Error();
+      const j = await r.json();
+      const t = parseFloat(j.temp);
+      if (!isNaN(t)) gauge.refresh(t);
+      lastOkTs = Date.now(); updateConnVisual();
+    }catch(_){}
+  }
+  refreshTemp(); setInterval(refreshTemp, 2000);
+
+  document.getElementById('formConfig').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const payload = [
+      fWifi.value.trim(), fSenha.value.trim(), fIp.value.trim(),
+      fUser.value.trim(), fPass.value.trim(), fTopic.value.trim(), fLocal.value.trim()
+    ].join(',');
+    try{
+      const r = await fetch('/configurar', { method:'POST', headers:{'Content-Type':'text/plain'}, body: payload });
+      if(!r.ok) throw new Error();
+      toast('Configurações enviadas. O dispositivo irá reiniciar…');
+      setTimeout(closeModal, 800);
+    }catch(_){ toast('Falha ao enviar configurações'); }
+  });
+})();
+</script>
 </body>
 </html>
-
 )rawliteral";
